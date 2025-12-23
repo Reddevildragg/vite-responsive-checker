@@ -1,61 +1,55 @@
-import type { Plugin } from 'vite';
+import { Plugin } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INDIVIDUAL_DEVICES, Device } from './devices';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export interface Device {
-  label: string;
-  width: number;
-  height: number;
-}
+export * from './devices';
 
 export interface ResponsiveReviewOptions {
   devices?: Device[];
+  offsets?: {
+    toolbar?: number;
+    taskbar?: number;
+    sideNav?: number;
+  };
 }
-
-const defaultDevices: Device[] = [
-  { label: 'Mobile (SE)', width: 375, height: 667 },
-  { label: 'Tablet', width: 768, height: 1024 },
-  { label: 'Laptop', width: 1280, height: 800 },
-  { label: 'Desktop', width: 1920, height: 1080 },
-];
 
 export function viteResponsiveReview(options: ResponsiveReviewOptions = {}): Plugin {
   return {
     name: 'vite-responsive-review',
     apply: 'serve',
     transformIndexHtml(html) {
-      const devices = options.devices || defaultDevices;
+      const inputDevices = options.devices || INDIVIDUAL_DEVICES;
 
-      // Resolve the client script path (works in dev and after build)
+      const offsets = {
+        toolbar: 70,
+        taskbar: 40,
+        sideNav: 200,
+        ...options.offsets,
+      };
+
+      const normalized = inputDevices.map((d, i) => ({
+        ...d,
+        id: d.id || `${d.label}-${i}`.toLowerCase().replace(/\s+/g, '-'),
+        groups: Array.isArray(d.groups) ? d.groups : d.groups ? [d.groups] : ['Other'],
+      }));
+
       const clientPath = path.resolve(__dirname, './client.ts');
-      let clientCode = '';
-
-      if (fs.existsSync(clientPath)) {
-        clientCode = fs.readFileSync(clientPath, 'utf-8');
-      } else {
-        // Fallback for production/dist builds
-        clientCode = fs.readFileSync(path.resolve(__dirname, './client.js'), 'utf-8');
-      }
-
-      // Clean the code: Remove 'export' and any leftover TS 'any' types just in case
-      const executableCode = clientCode
+      const clientCode = fs
+        .readFileSync(clientPath, 'utf-8')
         .replace(/export\s+/g, '')
-        .replace(/:\s*any/g, '')
-        .replace(/:\s*string/g, '');
+        .replace(/:\s*any/g, '');
 
       return [
         {
           tag: 'script',
           attrs: { type: 'module' },
           children: `
-            ${executableCode}
-            if (typeof initResponsiveUI === 'function') {
-              initResponsiveUI(${JSON.stringify(devices)});
-            }
-          `,
+          ${clientCode}
+          initResponsiveUI(${JSON.stringify(normalized)}, ${JSON.stringify(offsets)});
+        `,
           injectTo: 'body',
         },
       ];
