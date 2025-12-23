@@ -100,11 +100,6 @@ export const INDIVIDUAL_DEVICES: Device[] = [
   { id: 'desk-qhd', label: 'Monitor (QHD)', width: 2560, height: 1440, groups: ['Desktop'] },
   { id: 'desk-4k', label: 'Monitor (4K)', width: 3840, height: 2160, groups: ['Desktop'] },
   { id: 'ultra-w', label: 'Ultrawide 21:9', width: 3440, height: 1440, groups: ['Desktop'] },
-
-  // --- WEARABLES & OTHER ---
-  { id: 'watch-a', label: 'Apple Watch 45mm', width: 198, height: 242, groups: ['Watch', 'Apple'] },
-  { id: 'watch-p', label: 'Pixel Watch', width: 225, height: 225, groups: ['Watch', 'Android'] },
-  { id: 'smart-fridge', label: 'Smart Fridge', width: 1080, height: 1920, groups: ['Other'] },
 ];
 
 // Helper for grouping

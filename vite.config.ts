@@ -36,11 +36,6 @@ export default defineConfig({
         // This will default to group: ['Other']
         { label: 'Custom View', width: 500, height: 500 },
       ],
-      offsets: {
-        toolbar: 100, // Custom height for Chrome UI
-        taskbar: 48, // Windows 11 Taskbar
-        sideNav: 280, // Custom side navigation width
-      },
     }),
   ],
   resolve: {

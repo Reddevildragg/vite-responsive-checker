@@ -7,13 +7,16 @@ import { INDIVIDUAL_DEVICES, Device } from './devices';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export * from './devices';
 
+export interface GroupOffsets {
+  toolbar?: number;
+  taskbar?: number;
+  sideNav?: number;
+}
+
 export interface ResponsiveReviewOptions {
   devices?: Device[];
-  offsets?: {
-    toolbar?: number;
-    taskbar?: number;
-    sideNav?: number;
-  };
+  // Map group names to specific offsets
+  groupOffsets?: Record<string, GroupOffsets>;
 }
 
 export function viteResponsiveReview(options: ResponsiveReviewOptions = {}): Plugin {
@@ -23,12 +26,16 @@ export function viteResponsiveReview(options: ResponsiveReviewOptions = {}): Plu
     transformIndexHtml(html) {
       const inputDevices = options.devices || INDIVIDUAL_DEVICES;
 
-      const offsets = {
-        toolbar: 70,
-        taskbar: 40,
-        sideNav: 200,
-        ...options.offsets,
+      // Sensible defaults per common group
+      const defaultGroupOffsets: Record<string, GroupOffsets> = {
+        Desktop: { toolbar: 85, taskbar: 48, sideNav: 80 },
+        Laptop: { toolbar: 85, taskbar: 48, sideNav: 80 },
+        Tablet: { toolbar: 70, taskbar: 0, sideNav: 60 },
+        Mobile: { toolbar: 60, taskbar: 0, sideNav: 0 },
+        Other: { toolbar: 40, taskbar: 0, sideNav: 0 },
       };
+
+      const finalOffsets = { ...defaultGroupOffsets, ...options.groupOffsets };
 
       const normalized = inputDevices.map((d, i) => ({
         ...d,
@@ -36,9 +43,8 @@ export function viteResponsiveReview(options: ResponsiveReviewOptions = {}): Plu
         groups: Array.isArray(d.groups) ? d.groups : d.groups ? [d.groups] : ['Other'],
       }));
 
-      const clientPath = path.resolve(__dirname, './client.ts');
       const clientCode = fs
-        .readFileSync(clientPath, 'utf-8')
+        .readFileSync(path.resolve(__dirname, './client.ts'), 'utf-8')
         .replace(/export\s+/g, '')
         .replace(/:\s*any/g, '');
 
@@ -46,10 +52,7 @@ export function viteResponsiveReview(options: ResponsiveReviewOptions = {}): Plu
         {
           tag: 'script',
           attrs: { type: 'module' },
-          children: `
-          ${clientCode}
-          initResponsiveUI(${JSON.stringify(normalized)}, ${JSON.stringify(offsets)});
-        `,
+          children: `${clientCode} initResponsiveUI(${JSON.stringify(normalized)}, ${JSON.stringify(finalOffsets)});`,
           injectTo: 'body',
         },
       ];
