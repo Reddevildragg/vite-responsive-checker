@@ -6,8 +6,6 @@
 
     <div class="mt-8">
       <h2 class="text-2xl font-bold">Plugin Component</h2>
-      <!-- This component is registered by the example plugin -->
-      <ExampleComponent />
     </div>
   </section>
 </template>

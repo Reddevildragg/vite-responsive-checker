@@ -10,12 +10,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@plugins/*": [
-        "./plugins/*"
-      ]
+      "@/*": ["./src/*"],
+      "@plugins/*": ["./plugins/*"],
+      "vite-responsive-review": ["plugins/vite-responsive-review/src/index.ts"]
     }
   },
   "exclude": [

@@ -1,6 +1,0 @@
-{
-  "name": "example-plugin",
-  "version": "1.0.0",
-  "description": "An example plugin",
-  "main": "index.ts"
-}
