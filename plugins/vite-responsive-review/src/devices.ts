@@ -1,9 +1,16 @@
+export interface DeviceOffsets {
+  toolbar?: number;
+  taskbar?: number;
+  sideNav?: number;
+}
+
 export interface Device {
   id?: string;
   label: string;
   width: number;
   height: number;
-  groups?: string | string[]; // Smart property: string or array
+  groups?: string | string[];
+  offsets?: DeviceOffsets; // New: Specific device overrides
 }
 
 export const INDIVIDUAL_DEVICES: Device[] = [
@@ -28,7 +35,14 @@ export const INDIVIDUAL_DEVICES: Device[] = [
     height: 854,
     groups: ['Mobile', 'Android'],
   },
-  { id: 'p9-p', label: 'Pixel 9 Pro', width: 412, height: 915, groups: ['Mobile', 'Android'] },
+  {
+    id: 'p9-p',
+    label: 'Pixel 9 Pro',
+    width: 412,
+    height: 915,
+    groups: ['Mobile', 'Android'],
+    offsets: { toolbar: 25 },
+  },
   { id: 'p8', label: 'Pixel 8', width: 412, height: 732, groups: ['Mobile', 'Android'] },
   { id: 'n20-u', label: 'Note 20 Ultra', width: 412, height: 883, groups: ['Mobile', 'Android'] },
   { id: 'moto-g', label: 'Moto G Stylus', width: 395, height: 878, groups: ['Mobile', 'Android'] },

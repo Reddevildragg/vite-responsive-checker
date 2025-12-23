@@ -1,5 +1,6 @@
 /**
- * vite-responsive-review: Client UI Script (Full Corrected Version)
+ * vite-responsive-review: Client UI Script (Full Updated Version)
+ * Handles the responsive overlay, shell rendering, and browser simulation.
  */
 export const initResponsiveUI = (devices, groupOffsets) => {
   // 1. Prevent recursion: don't load the UI inside its own iframes
@@ -28,9 +29,9 @@ export const initResponsiveUI = (devices, groupOffsets) => {
   // --- CSS INJECTION ---
   const styleTag = document.createElement('style');
   styleTag.innerHTML = `
-    .rr-overlay { position: fixed; inset: 0; background: #0a0a0a; z-index: 9999998; display: none; overflow-y: auto; padding: 120px 40px 40px; box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    .rr-overlay { position: fixed; inset: 0; background: #0a0a0a; z-index: 9999998; display: none; overflow-y: auto; padding: 120px 40px 40px; box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; scroll-behavior: smooth; }
     .rr-filter-bar { position: fixed; top: 0; left: 0; width: 100%; padding: 15px; background: #141414; border-bottom: 1px solid #333; display: flex; gap: 20px; justify-content: center; align-items: center; z-index: 9999999; flex-wrap: wrap; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
-    .rr-grid { display: flex; flex-wrap: wrap; gap: 50px; justify-content: center; align-items: flex-start; }
+    .rr-grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; align-items: flex-start; }
     
     .rr-zoom-container { position: relative; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     
@@ -41,6 +42,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       transition: width 0.3s, height 0.3s;
     }
 
+    /* Browser UI Components */
     .rr-toolbar { background: #2b2b2b; border-bottom: 1px solid #3d3d3d; display: flex; align-items: center; padding: 0 15px; gap: 15px; flex-shrink: 0; overflow: hidden; }
     .rr-traffic { display: flex; gap: 6px; }
     .rr-dot { width: 10px; height: 10px; border-radius: 50%; }
@@ -60,6 +62,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
     .rr-win-icon { width: 22px; height: 22px; background: #0078d4; border-radius: 3px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 4px; box-sizing: border-box; }
     .rr-win-square { background: white; opacity: 0.9; }
 
+    /* Controls UI */
     .rr-toggle-btn { position: fixed; bottom: 20px; right: 20px; z-index: 10000000; padding: 12px 20px; background: #646cff; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 14px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: 0.2s; }
     .rr-toggle-btn:hover { transform: translateY(-2px); background: #7c83ff; }
 
@@ -68,15 +71,29 @@ export const initResponsiveUI = (devices, groupOffsets) => {
   document.head.appendChild(styleTag);
 
   // --- HELPERS ---
+
+  /**
+   * Tiered Offset Logic:
+   * 1. Individual Device Offset
+   * 2. Group Default Offset
+   * 3. 'Other' Fallback
+   */
   const getOffset = (dev, key) => {
-    // FIX: Corrected variable 'g' usage in find instead of 'group'
-    const group = dev.groups.find((g) => groupOffsets[g]) || 'Other';
-    const set = groupOffsets[group] || groupOffsets['Other'] || {};
-    return set[key] || 0;
+    // 1. Check individual device overrides
+    if (dev.offsets && typeof dev.offsets[key] !== 'undefined') {
+      return dev.offsets[key];
+    }
+
+    // 2. Check group defaults
+    const groupName = dev.groups.find((g) => groupOffsets[g]) || 'Other';
+    const set = groupOffsets[groupName] || groupOffsets['Other'] || {};
+
+    return typeof set[key] !== 'undefined' ? set[key] : 0;
   };
 
   const updateAllShells = () => {
     document.querySelectorAll('.rr-shell').forEach((shell) => {
+      const dev = devices.find((d) => d.id === shell.dataset.id);
       shell.querySelector('.rr-toolbar').classList.toggle('hidden', !state.showToolbar);
       shell.querySelector('.rr-taskbar').classList.toggle('hidden', !state.showTaskbar);
       shell.querySelector('.rr-sidenav-left').classList.toggle('hidden', !state.showSideLeft);
@@ -95,19 +112,20 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       const baseW = isRotated ? dev.height : dev.width;
       const baseH = isRotated ? dev.width : dev.height;
 
-      // Calculate Scaling
+      // Scale factor calculation
       let scale = 1;
       if (state.autoScale && baseW > maxAvailableW) scale = maxAvailableW / baseW;
 
       const card = document.createElement('div');
 
-      // Header
+      // Device Label & Header Controls
       const header = document.createElement('div');
       header.style.cssText = `width:${baseW * scale}px; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; color:#eee; font-size:11px;`;
       header.innerHTML = `<div><strong>${dev.label}</strong> <span style="opacity:0.5; margin-left:5px;">${baseW}x${baseH}</span></div>`;
 
       const rot = document.createElement('button');
       rot.innerText = '🔄';
+      rot.title = 'Rotate Device';
       rot.style.cssText =
         'background:none; border:none; cursor:pointer; font-size:12px; filter:grayscale(1); opacity:0.6;';
       rot.onclick = () => {
@@ -116,12 +134,13 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       };
       header.appendChild(rot);
 
-      // Shell Construction
+      // Construct Zoom Container (The visual hitbox)
       const zoomContainer = document.createElement('div');
       zoomContainer.className = 'rr-zoom-container';
       zoomContainer.style.width = `${baseW * scale}px`;
       zoomContainer.style.height = `${baseH * scale}px`;
 
+      // Construct the Shell (The simulated device)
       const shell = document.createElement('div');
       shell.className = 'rr-shell';
       shell.dataset.id = dev.id;
@@ -129,16 +148,20 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       shell.style.height = `${baseH}px`;
       shell.style.transform = `scale(${scale})`;
 
-      // 1. Toolbar
+      // A. Browser Toolbar
       const toolbar = document.createElement('div');
       toolbar.className = 'rr-toolbar';
       toolbar.style.height = `${getOffset(dev, 'toolbar')}px`;
       toolbar.innerHTML = `
-        <div class="rr-traffic"><div class="rr-dot" style="background:#ff5f56"></div><div class="rr-dot" style="background:#ffbd2e"></div><div class="rr-dot" style="background:#27c93f"></div></div>
+        <div class="rr-traffic">
+          <div class="rr-dot" style="background:#ff5f56"></div>
+          <div class="rr-dot" style="background:#ffbd2e"></div>
+          <div class="rr-dot" style="background:#27c93f"></div>
+        </div>
         <div class="rr-url-bar">localhost:5173</div>
       `;
 
-      // 2. Body (Sidebars + Iframe)
+      // B. Body Wrapper (Sidebars + Iframe)
       const bodyWrapper = document.createElement('div');
       bodyWrapper.className = 'rr-body-wrapper';
 
@@ -152,7 +175,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
             <div class="rr-side-icon" style="background:linear-gradient(#4facfe,#00f2fe)"></div>
             <div class="rr-side-icon" style="background:linear-gradient(#f093fb,#f5576c)"></div>
           </div>
-          <div style="color:#444; font-size:18px;">⚙️</div>
+          <div style="color:#444; font-size:18px; margin-bottom: 10px;">⚙️</div>
         `;
         return nav;
       };
@@ -169,24 +192,30 @@ export const initResponsiveUI = (devices, groupOffsets) => {
         createSideNav('rr-sidenav-right'),
       );
 
-      // 3. Taskbar
+      // C. OS Taskbar
       const taskbar = document.createElement('div');
       taskbar.className = 'rr-taskbar';
       taskbar.style.height = `${getOffset(dev, 'taskbar')}px`;
-      taskbar.innerHTML = `<div class="rr-win-icon"><div class="rr-win-square"></div><div class="rr-win-square"></div><div class="rr-win-square"></div><div class="rr-win-square"></div></div>`;
+      taskbar.innerHTML = `
+        <div class="rr-win-icon">
+          <div class="rr-win-square"></div><div class="rr-win-square"></div>
+          <div class="rr-win-square"></div><div class="rr-win-square"></div>
+        </div>
+      `;
 
       shell.append(toolbar, bodyWrapper, taskbar);
       zoomContainer.appendChild(shell);
       card.append(header, zoomContainer);
       grid.appendChild(card);
     });
+
     updateAllShells();
   };
 
   const buildControls = () => {
     filterBar.innerHTML = '';
 
-    // Group Selectors
+    // 1. Group Selection Buttons
     const groupPanel = document.createElement('div');
     groupPanel.style.display = 'flex';
     [...new Set(devices.flatMap((d) => d.groups))].sort().forEach((g) => {
@@ -202,7 +231,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       groupPanel.appendChild(t);
     });
 
-    // Feature Toggles
+    // 2. Feature Toggle Buttons (Toolbar, Taskbar, Sidebars, Scale)
     const simPanel = document.createElement('div');
     simPanel.style.cssText =
       'border-left: 1px solid #333; padding-left: 20px; margin-left: 10px; display:flex; gap:8px;';
@@ -222,6 +251,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       t.style.cssText = `padding:6px 12px; border-radius:6px; font-size:11px; cursor:pointer; transition:0.2s; border:1px solid ${active ? '#646cff' : '#333'}; background:${active ? '#333' : '#1a1a1a'}; color:${active ? '#fff' : '#888'};`;
       t.onclick = () => {
         state[key] = !state[key];
+        // Auto scale and re-render or just toggle CSS classes
         if (key === 'autoScale') render();
         else updateAllShells();
         buildControls();
@@ -254,7 +284,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
     }
   };
 
-  // Resize listener
+  // Resize listener for auto-scaling
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
