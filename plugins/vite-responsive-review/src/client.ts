@@ -88,11 +88,20 @@ const setupMasterSync = () => {
       }
     } else if (msg.type === 'slave-navigated') {
         // Sync Master to Slave's navigation
-        if (msg.url !== window.location.href) {
-            // Update history without reloading page (preserves overlay state)
-            history.pushState(null, '', msg.url);
-            // Dispatch popstate to notify framework routers (e.g., Vue Router)
-            window.dispatchEvent(new PopStateEvent('popstate'));
+        // Slave sends URL with 'is-responsive-view=true'. We MUST strip it for the Master.
+        try {
+            const urlObj = new URL(msg.url);
+            urlObj.searchParams.delete('is-responsive-view');
+            const cleanUrl = urlObj.toString();
+
+            if (cleanUrl !== window.location.href) {
+                // Update history without reloading page (preserves overlay state)
+                history.pushState(null, '', cleanUrl);
+                // Dispatch popstate to notify framework routers (e.g., Vue Router)
+                window.dispatchEvent(new PopStateEvent('popstate'));
+            }
+        } catch (e) {
+            console.warn('Failed to parse slave URL', e);
         }
     } else if (msg.type === 'slave-scroll') {
         // Sync Master to Slave's scroll
@@ -140,9 +149,18 @@ const setupSlaveSync = () => {
   channel.onmessage = (event: MessageEvent) => {
     const msg = event.data;
     if (msg.type === 'navigation-update') {
-      // Avoid infinite loop if we are already there
-      if (window.location.href !== msg.url) {
-        window.location.replace(msg.url);
+      // Master sends clean URL. We MUST add 'is-responsive-view=true' to keep Slave status.
+      try {
+          const urlObj = new URL(msg.url);
+          urlObj.searchParams.set('is-responsive-view', 'true');
+          const slaveUrl = urlObj.toString();
+
+          // Avoid infinite loop if we are already there
+          if (window.location.href !== slaveUrl) {
+            window.location.replace(slaveUrl);
+          }
+      } catch (e) {
+          console.warn('Failed to parse master URL', e);
       }
     } else if (msg.type === 'scroll-update') {
         // Check threshold to avoid loops
