@@ -524,7 +524,7 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
               return card;
           };
 
-          const updateCard = (card: HTMLElement, dev: any, scale: number) => {
+          const updateCard = (card: any, dev: any, scale: number) => {
              // Update Header Width
              const header = card.querySelector('.rr-header') as HTMLElement;
              if (header) {
@@ -585,7 +585,7 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
             const maxAvailableW = window.innerWidth - 600;
 
             // Gather active devices
-            const activeDevices: any[] = [];
+            const activeDevices: any = [];
             devices.forEach((dev: any) => {
                 if (dev.groups.some((g: string) => state.activeGroups.has(g))) {
                     const isRotated = orientationState[dev.id] === 'landscape';
@@ -597,10 +597,10 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
             });
 
             // Remove inactive cards
-            const gridCards = Array.from(grid.children) as HTMLElement[];
-            const activeIds = new Set(activeDevices.map(d => d.id));
+            const gridCards = Array.from(grid.children) as any;
+            const activeIds = new Set(activeDevices.map((d: any) => d.id));
 
-            gridCards.forEach(card => {
+            gridCards.forEach((card: any) => {
                 const id = card.dataset.devId;
                 if (id && !activeIds.has(id)) {
                     card.remove();
@@ -608,7 +608,7 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
             });
 
             // Create or Update cards
-            activeDevices.forEach(currentDev => {
+            activeDevices.forEach((currentDev: any) => {
                 let scale = 1;
                 if (state.autoScale && currentDev.width > maxAvailableW) scale = maxAvailableW / currentDev.width;
 
