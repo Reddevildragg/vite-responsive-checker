@@ -270,6 +270,9 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
   const orientationState: any = {};
   devices.forEach((d: any) => (orientationState[d.id] = 'portrait'));
 
+  // Ensure 'master-controller' state if needed, though we don't have it in `devices` usually
+  orientationState['master-controller'] = 'portrait';
+
   let state = {
     isOpen: false,
     showToolbar: true,
@@ -284,6 +287,10 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
   const btn = document.createElement('button');
   const overlay = document.createElement('div');
   const filterBar = document.createElement('div');
+
+  // New Layout Containers
+  const stage = document.createElement('div');
+  const masterPane = document.createElement('div');
   const grid = document.createElement('div');
 
   // --- CSS INJECTION ---
@@ -291,7 +298,10 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
   styleTag.innerHTML = `
     .rr-overlay { position: fixed; inset: 0; background: #0a0a0a; z-index: 9999998; display: none; overflow-y: auto; padding: 120px 40px 40px; box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; scroll-behavior: smooth; }
     .rr-filter-bar { position: fixed; top: 0; left: 0; width: 100%; padding: 15px; background: #141414; border-bottom: 1px solid #333; display: flex; gap: 20px; justify-content: center; align-items: center; z-index: 9999999; flex-wrap: wrap; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
-    .rr-grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; align-items: flex-start; }
+
+    .rr-stage { display: flex; align-items: flex-start; gap: 40px; }
+    .rr-master-pane { position: sticky; top: 0; z-index: 100; flex-shrink: 0; }
+    .rr-grid { display: flex; flex-wrap: wrap; gap: 60px; justify-content: center; align-items: flex-start; flex: 1; }
     
     .rr-zoom-container { position: relative; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
     
@@ -353,9 +363,25 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
 
   const updateAllShells = () => {
     document.querySelectorAll('.rr-shell').forEach((shell) => {
+      // Logic adapted: handle Master Controller which might not be in 'devices'
       const id = (shell as HTMLElement).dataset.id;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      if (id === 'master-controller') {
+          // Master controller respects global toggles?
+          // Assuming yes for consistent look, or maybe it should always have them?
+          // Let's stick to global toggles.
+          const toolbar = shell.querySelector('.rr-toolbar');
+          if (toolbar) toolbar.classList.toggle('hidden', !state.showToolbar);
+          const taskbar = shell.querySelector('.rr-taskbar');
+          if (taskbar) taskbar.classList.toggle('hidden', !state.showTaskbar);
+          const sideLeft = shell.querySelector('.rr-sidenav-left');
+          if (sideLeft) sideLeft.classList.toggle('hidden', !state.showSideLeft);
+          const sideRight = shell.querySelector('.rr-sidenav-right');
+          if (sideRight) sideRight.classList.toggle('hidden', !state.showSideRight);
+          return;
+      }
+
       const dev = devices.find((d: any) => d.id === id);
+      if (!dev) return;
 
       const toolbar = shell.querySelector('.rr-toolbar');
       if (toolbar) toolbar.classList.toggle('hidden', !state.showToolbar);
@@ -371,51 +397,40 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
     });
   };
 
-  const render = () => {
-    grid.innerHTML = '';
-    const maxAvailableW = window.innerWidth - 100;
-
-    devices.forEach((dev: any) => {
-      if (!dev.groups.some((g: string) => state.activeGroups.has(g))) return;
-
-      const isRotated = orientationState[dev.id] === 'landscape';
-      const baseW = isRotated ? dev.height : dev.width;
-      const baseH = isRotated ? dev.width : dev.height;
-
-      // Scale factor calculation
-      let scale = 1;
-      if (state.autoScale && baseW > maxAvailableW) scale = maxAvailableW / baseW;
-
+  const createShell = (dev: any, scale: number) => {
       const card = document.createElement('div');
 
       // Device Label & Header Controls
       const header = document.createElement('div');
-      header.style.cssText = `width:${baseW * scale}px; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; color:#eee; font-size:11px;`;
-      header.innerHTML = `<div><strong>${dev.label}</strong> <span style="opacity:0.5; margin-left:5px;">${baseW}x${baseH}</span></div>`;
+      header.style.cssText = `width:${dev.width * scale}px; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; color:#eee; font-size:11px;`;
+      header.innerHTML = `<div><strong>${dev.label}</strong> <span style="opacity:0.5; margin-left:5px;">${dev.width}x${dev.height}</span></div>`;
 
-      const rot = document.createElement('button');
-      rot.innerText = '🔄';
-      rot.title = 'Rotate Device';
-      rot.style.cssText =
-        'background:none; border:none; cursor:pointer; font-size:12px; filter:grayscale(1); opacity:0.6;';
-      rot.onclick = () => {
-        orientationState[dev.id] = isRotated ? 'portrait' : 'landscape';
-        render();
-      };
-      header.appendChild(rot);
+      // Only allow rotation if it's NOT the master controller (keep it fixed 16:9)
+      if (dev.id !== 'master-controller') {
+          const rot = document.createElement('button');
+          rot.innerText = '🔄';
+          rot.title = 'Rotate Device';
+          rot.style.cssText =
+            'background:none; border:none; cursor:pointer; font-size:12px; filter:grayscale(1); opacity:0.6;';
+          rot.onclick = () => {
+            orientationState[dev.id] = orientationState[dev.id] === 'landscape' ? 'portrait' : 'landscape';
+            render();
+          };
+          header.appendChild(rot);
+      }
 
       // Construct Zoom Container (The visual hitbox)
       const zoomContainer = document.createElement('div');
       zoomContainer.className = 'rr-zoom-container';
-      zoomContainer.style.width = `${baseW * scale}px`;
-      zoomContainer.style.height = `${baseH * scale}px`;
+      zoomContainer.style.width = `${dev.width * scale}px`;
+      zoomContainer.style.height = `${dev.height * scale}px`;
 
       // Construct the Shell (The simulated device)
       const shell = document.createElement('div');
       shell.className = 'rr-shell';
       shell.dataset.id = dev.id;
-      shell.style.width = `${baseW}px`;
-      shell.style.height = `${baseH}px`;
+      shell.style.width = `${dev.width}px`;
+      shell.style.height = `${dev.height}px`;
       shell.style.transform = `scale(${scale})`;
 
       // A. Browser Toolbar
@@ -476,6 +491,54 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
       shell.append(toolbar, bodyWrapper, taskbar);
       zoomContainer.appendChild(shell);
       card.append(header, zoomContainer);
+      return card;
+  };
+
+  const render = () => {
+    grid.innerHTML = '';
+    masterPane.innerHTML = '';
+
+    // --- 1. RENDER MASTER CONTROLLER ---
+    // Fixed 1920x1080, scaled down (0.25)
+    const masterDev = {
+        id: 'master-controller',
+        label: 'Master Controller',
+        width: 1920,
+        height: 1080,
+        groups: ['Master'],
+        offsets: { toolbar: 85, taskbar: 48, sideNav: 80 } // Desktop defaults
+    };
+
+    // Create label for section
+    const masterLabel = document.createElement('div');
+    masterLabel.innerText = 'CONTROLLER';
+    masterLabel.style.cssText = 'color:#888; font-size:10px; font-weight:bold; letter-spacing:1px; margin-bottom:10px; padding-left:2px;';
+    masterPane.appendChild(masterLabel);
+
+    const masterCard = createShell(masterDev, 0.25);
+    // Add a border highlight to show it's the master
+    (masterCard.querySelector('.rr-shell') as HTMLElement).style.border = '2px solid #646cff';
+    masterPane.appendChild(masterCard);
+
+
+    // --- 2. RENDER SLAVES (GRID) ---
+    const maxAvailableW = window.innerWidth - 600; // Subtract Master Pane width approx
+
+    devices.forEach((dev: any) => {
+      if (!dev.groups.some((g: string) => state.activeGroups.has(g))) return;
+
+      const isRotated = orientationState[dev.id] === 'landscape';
+      const w = isRotated ? dev.height : dev.width;
+      const h = isRotated ? dev.width : dev.height;
+
+      // Create a temporary dev object with swapped dimensions for rendering
+      const currentDev = { ...dev, width: w, height: h };
+
+      // Scale factor calculation
+      let scale = 1;
+      if (state.autoScale && w > maxAvailableW) scale = maxAvailableW / w;
+
+      const card = createShell(currentDev, scale);
       grid.appendChild(card);
     });
 
@@ -537,12 +600,17 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
   // --- INITIALIZATION ---
   overlay.className = 'rr-overlay';
   filterBar.className = 'rr-filter-bar';
+
+  stage.className = 'rr-stage';
+  masterPane.className = 'rr-master-pane';
   grid.className = 'rr-grid';
+
+  stage.append(masterPane, grid);
+  overlay.append(filterBar, stage);
+  document.body.append(btn, overlay);
+
   btn.className = 'rr-toggle-btn';
   btn.innerText = '📱 View Layouts';
-
-  overlay.append(filterBar, grid);
-  document.body.append(btn, overlay);
 
   btn.onclick = () => {
     state.isOpen = !state.isOpen;
