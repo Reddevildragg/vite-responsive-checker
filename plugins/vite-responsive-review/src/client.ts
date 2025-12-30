@@ -60,7 +60,9 @@ const setupMasterSync = () => {
   // 2. Fetch Proxy Handler
   channel.onmessage = async (event: MessageEvent) => {
     const msg = event.data;
-    if (msg && msg.type === 'fetch-request') {
+    if (!msg) return;
+
+    if (msg.type === 'fetch-request') {
       try {
         const { id, url, options } = msg;
         // Perform the actual fetch
@@ -79,6 +81,20 @@ const setupMasterSync = () => {
           error: error instanceof Error ? error.message : String(error)
         });
       }
+    } else if (msg.type === 'slave-navigated') {
+        // Sync Master to Slave's navigation
+        if (msg.url !== window.location.href) {
+            // Update history without reloading page (preserves overlay state)
+            history.pushState(null, '', msg.url);
+            // Dispatch popstate to notify framework routers (e.g., Vue Router)
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        }
+    } else if (msg.type === 'slave-scroll') {
+        // Sync Master to Slave's scroll
+        // Check threshold to avoid loops
+        if (Math.abs(window.scrollX - msg.x) > 2 || Math.abs(window.scrollY - msg.y) > 2) {
+            window.scrollTo(msg.x, msg.y);
+        }
     }
   };
 
@@ -100,7 +116,17 @@ const setupMasterSync = () => {
 const setupSlaveSync = () => {
   const channel = new BroadcastChannel(CHANNEL_NAME);
 
-  // 1. Listen for Navigation Updates
+  // 1. Navigation Listening & Broadcasting
+
+  // Broadcast navigation to Master
+  const notifyMaster = () => {
+      channel.postMessage({
+          type: 'slave-navigated',
+          url: window.location.href
+      });
+  };
+
+  // Listen for navigation updates from Master
   channel.onmessage = (event: MessageEvent) => {
     const msg = event.data;
     if (msg.type === 'navigation-update') {
@@ -109,9 +135,41 @@ const setupSlaveSync = () => {
         window.location.replace(msg.url);
       }
     } else if (msg.type === 'scroll-update') {
-        window.scrollTo(msg.x, msg.y);
+        // Check threshold to avoid loops
+        if (Math.abs(window.scrollX - msg.x) > 2 || Math.abs(window.scrollY - msg.y) > 2) {
+            window.scrollTo(msg.x, msg.y);
+        }
     }
   };
+
+  // Monkey-patch history to detect local navigation changes (e.g. RouterLink clicks)
+  const originalPushState = history.pushState;
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    notifyMaster();
+  };
+
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    notifyMaster();
+  };
+
+  window.addEventListener('popstate', notifyMaster);
+
+  // Broadcast scroll to Master
+  let scrollTimeout: any = null;
+  window.addEventListener('scroll', () => {
+      if (scrollTimeout) return;
+      scrollTimeout = setTimeout(() => {
+          channel.postMessage({
+              type: 'slave-scroll',
+              x: window.scrollX,
+              y: window.scrollY
+          });
+          scrollTimeout = null;
+      }, 50);
+  });
 
   // 2. Proxy Fetch Requests
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -126,10 +184,6 @@ const setupSlaveSync = () => {
         if (!options.method) options.method = input.method;
         if (!options.headers) options.headers = serializeHeaders(input.headers);
         if (!options.body && input.body) {
-             // Request body is a stream, which is hard to clone.
-             // If we can, we should read it. But input.body might be used already?
-             // Simplification: Assume most requests are JSON/Text if they have body.
-             // Or clone the request?
              try {
                 const clone = input.clone();
                 options.body = await clone.blob(); // Get as blob
@@ -158,7 +212,6 @@ const setupSlaveSync = () => {
     if (options.headers instanceof Headers) {
         options.headers = serializeHeaders(options.headers);
     }
-
 
     const requestId = Math.random().toString(36).substring(7);
 
