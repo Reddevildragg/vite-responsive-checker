@@ -88,7 +88,6 @@ const setupMasterSync = () => {
       }
     } else if (msg.type === 'slave-navigated') {
         // Sync Master to Slave's navigation
-        // Slave sends URL with 'is-responsive-view=true'. We MUST strip it for the Master.
         try {
             const urlObj = new URL(msg.url);
             urlObj.searchParams.delete('is-responsive-view');
@@ -157,7 +156,9 @@ const setupSlaveSync = () => {
 
           // Avoid infinite loop if we are already there
           if (window.location.href !== slaveUrl) {
-            window.location.replace(slaveUrl);
+            // SOFT NAVIGATION: Use history API + dispatch popstate to avoid reload
+            history.replaceState(null, '', slaveUrl);
+            window.dispatchEvent(new PopStateEvent('popstate'));
           }
       } catch (e) {
           console.warn('Failed to parse master URL', e);
@@ -423,11 +424,14 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
 
           const createShell = (dev: any, scale: number) => {
               const card = document.createElement('div');
+              card.className = 'rr-card';
+              card.dataset.devId = dev.id;
 
               // Device Label & Header Controls
               const header = document.createElement('div');
+              header.className = 'rr-header';
               header.style.cssText = `width:${dev.width * scale}px; display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; color:#eee; font-size:11px;`;
-              header.innerHTML = `<div><strong>${dev.label}</strong> <span style="opacity:0.5; margin-left:5px;">${dev.width}x${dev.height}</span></div>`;
+              header.innerHTML = `<div class="rr-label"><strong>${dev.label}</strong> <span style="opacity:0.5; margin-left:5px;">${dev.width}x${dev.height}</span></div>`;
 
               if (dev.id !== 'master-controller') {
                   const rot = document.createElement('button');
@@ -512,10 +516,36 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
               return card;
           };
 
-          const render = () => {
-            grid.innerHTML = '';
-            masterPane.innerHTML = '';
+          const updateCard = (card: HTMLElement, dev: any, scale: number) => {
+             // Update Header Width
+             const header = card.querySelector('.rr-header') as HTMLElement;
+             if (header) {
+                 header.style.width = `${dev.width * scale}px`;
+                 // Update label text
+                 const label = header.querySelector('.rr-label');
+                 if (label) {
+                     label.innerHTML = `<strong>${dev.label}</strong> <span style="opacity:0.5; margin-left:5px;">${dev.width}x${dev.height}</span>`;
+                 }
+             }
 
+             // Update Zoom Container
+             const zoomContainer = card.querySelector('.rr-zoom-container') as HTMLElement;
+             if (zoomContainer) {
+                 zoomContainer.style.width = `${dev.width * scale}px`;
+                 zoomContainer.style.height = `${dev.height * scale}px`;
+             }
+
+             // Update Shell
+             const shell = card.querySelector('.rr-shell') as HTMLElement;
+             if (shell) {
+                 shell.style.width = `${dev.width}px`;
+                 shell.style.height = `${dev.height}px`;
+                 shell.style.transform = `scale(${scale})`;
+             }
+          };
+
+          const render = () => {
+            // --- 1. HANDLE MASTER CONTROLLER ---
             const masterDev = {
                 id: 'master-controller',
                 label: 'Master Controller',
@@ -525,32 +555,63 @@ export const initResponsiveUI = (devices: any, groupOffsets: any) => {
                 offsets: { toolbar: 85, taskbar: 48, sideNav: 80 }
             };
 
-            const masterLabel = document.createElement('div');
-            masterLabel.innerText = 'CONTROLLER';
-            masterLabel.style.cssText = 'color:#888; font-size:10px; font-weight:bold; letter-spacing:1px; margin-bottom:10px; padding-left:2px;';
-            masterPane.appendChild(masterLabel);
+            // Check if master card exists
+            let masterCard = masterPane.querySelector('.rr-card') as HTMLElement;
+            if (!masterCard) {
+                // Initial creation
+                masterPane.innerHTML = ''; // Clear label if exists
+                const masterLabel = document.createElement('div');
+                masterLabel.innerText = 'CONTROLLER';
+                masterLabel.style.cssText = 'color:#888; font-size:10px; font-weight:bold; letter-spacing:1px; margin-bottom:10px; padding-left:2px;';
+                masterPane.appendChild(masterLabel);
 
-            const masterCard = createShell(masterDev, 0.25);
-            (masterCard.querySelector('.rr-shell') as HTMLElement).style.border = '2px solid #646cff';
-            masterPane.appendChild(masterCard);
+                masterCard = createShell(masterDev, 0.25);
+                (masterCard.querySelector('.rr-shell') as HTMLElement).style.border = '2px solid #646cff';
+                masterPane.appendChild(masterCard);
+            } else {
+                // Update
+                updateCard(masterCard, masterDev, 0.25);
+            }
 
-
+            // --- 2. HANDLE GRID DEVICES ---
             const maxAvailableW = window.innerWidth - 600;
 
+            // Gather active devices
+            const activeDevices: any[] = [];
             devices.forEach((dev: any) => {
-              if (!dev.groups.some((g: string) => state.activeGroups.has(g))) return;
+                if (dev.groups.some((g: string) => state.activeGroups.has(g))) {
+                    const isRotated = orientationState[dev.id] === 'landscape';
+                    const w = isRotated ? dev.height : dev.width;
+                    const h = isRotated ? dev.width : dev.height;
 
-              const isRotated = orientationState[dev.id] === 'landscape';
-              const w = isRotated ? dev.height : dev.width;
-              const h = isRotated ? dev.width : dev.height;
+                    activeDevices.push({ ...dev, width: w, height: h });
+                }
+            });
 
-              const currentDev = { ...dev, width: w, height: h };
+            // Remove inactive cards
+            const gridCards = Array.from(grid.children) as HTMLElement[];
+            const activeIds = new Set(activeDevices.map(d => d.id));
 
-              let scale = 1;
-              if (state.autoScale && w > maxAvailableW) scale = maxAvailableW / w;
+            gridCards.forEach(card => {
+                const id = card.dataset.devId;
+                if (id && !activeIds.has(id)) {
+                    card.remove();
+                }
+            });
 
-              const card = createShell(currentDev, scale);
-              grid.appendChild(card);
+            // Create or Update cards
+            activeDevices.forEach(currentDev => {
+                let scale = 1;
+                if (state.autoScale && currentDev.width > maxAvailableW) scale = maxAvailableW / currentDev.width;
+
+                const existingCard = grid.querySelector(`.rr-card[data-dev-id="${currentDev.id}"]`) as HTMLElement;
+
+                if (existingCard) {
+                    updateCard(existingCard, currentDev, scale);
+                } else {
+                    const card = createShell(currentDev, scale);
+                    grid.appendChild(card);
+                }
             });
 
             updateAllShells();
