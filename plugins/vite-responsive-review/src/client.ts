@@ -152,8 +152,9 @@ const setupSlaveSync = () => {
 
   // Listen for navigation updates from Master
   channel.onmessage = (event: MessageEvent) => {
+    console.log(event)
     const msg = event.data;
-    if (msg.type === 'navigation-update') {
+    if (msg.type === 'slave-navigated') {
       // Master sends clean URL. We MUST add 'is-responsive-view=true' to keep Slave status.
       try {
           const urlObj = new URL(msg.url);
