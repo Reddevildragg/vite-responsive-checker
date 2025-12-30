@@ -38,9 +38,11 @@ const setupMasterSync = () => {
   }
 
   const channel = new BroadcastChannel(CHANNEL_NAME);
+  let isSyncing = false;
 
   // 1. Navigation Broadcasting
   const notifyNavigation = () => {
+    if (isSyncing) return;
     channel.postMessage({
       type: 'navigation-update',
       url: window.location.href
@@ -93,11 +95,13 @@ const setupMasterSync = () => {
             urlObj.searchParams.delete('is-responsive-view');
             const cleanUrl = urlObj.toString();
 
-            if (cleanUrl !== window.location.href) {
+            if (decodeURI(cleanUrl) !== decodeURI(window.location.href)) {
+                isSyncing = true;
                 // Update history without reloading page (preserves overlay state)
                 history.pushState(null, '', cleanUrl);
                 // Dispatch popstate to notify framework routers (e.g., Vue Router)
                 window.dispatchEvent(new PopStateEvent('popstate'));
+                isSyncing = false;
             }
         } catch (e) {
             console.warn('Failed to parse slave URL', e);
@@ -133,11 +137,13 @@ const setupSlaveSync = () => {
   }
 
   const channel = new BroadcastChannel(CHANNEL_NAME);
+  let isSyncing = false;
 
   // 1. Navigation Listening & Broadcasting
 
   // Broadcast navigation to Master
   const notifyMaster = () => {
+      if (isSyncing) return;
       channel.postMessage({
           type: 'slave-navigated',
           url: window.location.href
@@ -155,10 +161,12 @@ const setupSlaveSync = () => {
           const slaveUrl = urlObj.toString();
 
           // Avoid infinite loop if we are already there
-          if (window.location.href !== slaveUrl) {
+          if (decodeURI(window.location.href) !== decodeURI(slaveUrl)) {
+            isSyncing = true;
             // SOFT NAVIGATION: Use history API + dispatch popstate to avoid reload
             history.replaceState(null, '', slaveUrl);
             window.dispatchEvent(new PopStateEvent('popstate'));
+            isSyncing = false;
           }
       } catch (e) {
           console.warn('Failed to parse master URL', e);
