@@ -2,13 +2,220 @@
  * vite-responsive-review: Client UI Script (Full Updated Version)
  * Handles the responsive overlay, shell rendering, and browser simulation.
  */
-export const initResponsiveUI = (devices, groupOffsets) => {
-  // 1. Prevent recursion: don't load the UI inside its own iframes
-  if (window.location.search.includes('is-responsive-view=true')) return;
+
+// --- SYNC UTILS ---
+const CHANNEL_NAME = 'responsive-review-sync';
+
+// Helper to serialize Headers
+const serializeHeaders = (headers: Headers) => {
+  const h: any = {};
+  for (const [key, value] of headers.entries()) {
+    h[key] = value;
+  }
+  return h;
+};
+
+// Helper to serialize Response
+const serializeResponse = async (response: Response) => {
+  const blob = await response.blob();
+  return {
+    id: null, // set by caller
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: serializeHeaders(response.headers),
+    body: blob, // Send as Blob
+    url: response.url,
+    responseType: response.type,
+    redirected: response.redirected
+  };
+};
+
+const setupMasterSync = () => {
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+
+  // 1. Navigation Broadcasting
+  const notifyNavigation = () => {
+    channel.postMessage({
+      type: 'navigation-update',
+      url: window.location.href
+    });
+  };
+
+  window.addEventListener('popstate', notifyNavigation);
+
+  // Monkey-patch pushState/replaceState to catch programmatic navigation
+  const originalPushState = history.pushState;
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    notifyNavigation();
+  };
+
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    notifyNavigation();
+  };
+
+  // 2. Fetch Proxy Handler
+  channel.onmessage = async (event: MessageEvent) => {
+    const msg = event.data;
+    if (msg && msg.type === 'fetch-request') {
+      try {
+        const { id, url, options } = msg;
+        // Perform the actual fetch
+        const response = await window.fetch(url, options);
+        const serialized = await serializeResponse(response);
+        serialized.id = id;
+
+        channel.postMessage({
+          type: 'fetch-response',
+          ...serialized
+        });
+      } catch (error) {
+        channel.postMessage({
+          type: 'fetch-error',
+          id: msg.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  };
+
+  // 3. Scroll Sync Broadcasting
+  let scrollTimeout: any = null;
+  window.addEventListener('scroll', () => {
+    if (scrollTimeout) return;
+    scrollTimeout = setTimeout(() => {
+        channel.postMessage({
+            type: 'scroll-update',
+            x: window.scrollX,
+            y: window.scrollY
+        });
+        scrollTimeout = null;
+    }, 50);
+  });
+};
+
+const setupSlaveSync = () => {
+  const channel = new BroadcastChannel(CHANNEL_NAME);
+
+  // 1. Listen for Navigation Updates
+  channel.onmessage = (event: MessageEvent) => {
+    const msg = event.data;
+    if (msg.type === 'navigation-update') {
+      // Avoid infinite loop if we are already there
+      if (window.location.href !== msg.url) {
+        window.location.replace(msg.url);
+      }
+    } else if (msg.type === 'scroll-update') {
+        window.scrollTo(msg.x, msg.y);
+    }
+  };
+
+  // 2. Proxy Fetch Requests
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const originalFetch = window.fetch;
+  window.fetch = async (input, init) => {
+    let url = input;
+    let options: any = init || {};
+
+    if (input instanceof Request) {
+        url = input.url;
+        // Merge request options if not present in init
+        if (!options.method) options.method = input.method;
+        if (!options.headers) options.headers = serializeHeaders(input.headers);
+        if (!options.body && input.body) {
+             // Request body is a stream, which is hard to clone.
+             // If we can, we should read it. But input.body might be used already?
+             // Simplification: Assume most requests are JSON/Text if they have body.
+             // Or clone the request?
+             try {
+                const clone = input.clone();
+                options.body = await clone.blob(); // Get as blob
+             } catch (e) {
+                 console.warn('Could not clone request body for proxy', e);
+             }
+        }
+        // Copy other properties
+        if (!options.mode) options.mode = input.mode;
+        if (!options.credentials) options.credentials = input.credentials;
+        if (!options.cache) options.cache = input.cache;
+        if (!options.redirect) options.redirect = input.redirect;
+        if (!options.referrer) options.referrer = input.referrer;
+        if (!options.referrerPolicy) options.referrerPolicy = input.referrerPolicy;
+        if (!options.integrity) options.integrity = input.integrity;
+        if (!options.keepalive) options.keepalive = input.keepalive;
+    }
+
+    // Strip AbortSignal as it is not serializable
+    if (options.signal) {
+        delete options.signal;
+        console.warn('AbortSignal is not supported in Responsive Review proxy mode.');
+    }
+
+    // Ensure headers are plain object
+    if (options.headers instanceof Headers) {
+        options.headers = serializeHeaders(options.headers);
+    }
+
+
+    const requestId = Math.random().toString(36).substring(7);
+
+    return new Promise((resolve, reject) => {
+
+        const handler = (event: MessageEvent) => {
+            const msg = event.data;
+            if (msg.id === requestId) {
+                if (msg.type === 'fetch-response') {
+                    channel.removeEventListener('message', handler);
+
+                    // Reconstruct Response
+                    const response = new Response(msg.body as any, {
+                        status: msg.status,
+                        statusText: msg.statusText,
+                        headers: new Headers(msg.headers as any)
+                    });
+
+                    // Define properties that Response ctor doesn't set
+                    Object.defineProperty(response, 'url', { value: msg.url });
+                    Object.defineProperty(response, 'redirected', { value: msg.redirected });
+                    Object.defineProperty(response, 'type', { value: msg.responseType });
+
+                    resolve(response);
+                } else if (msg.type === 'fetch-error') {
+                    channel.removeEventListener('message', handler);
+                    reject(new TypeError(msg.error as string));
+                }
+            }
+        };
+
+        channel.addEventListener('message', handler);
+
+        channel.postMessage({
+            type: 'fetch-request',
+            id: requestId,
+            url: url.toString(),
+            options: options
+        });
+    });
+  };
+};
+
+export const initResponsiveUI = (devices: any, groupOffsets: any) => {
+  // Check if we are in a slave (iframe)
+  if (window.location.search.includes('is-responsive-view=true')) {
+    setupSlaveSync();
+    return;
+  }
+
+  // If we are here, we are likely the Master (or a normal view)
+  // We initialize the Master Sync
+  setupMasterSync();
 
   // --- STATE ---
-  const orientationState = {};
-  devices.forEach((d) => (orientationState[d.id] = 'portrait'));
+  const orientationState: any = {};
+  devices.forEach((d: any) => (orientationState[d.id] = 'portrait'));
 
   let state = {
     isOpen: false,
@@ -17,7 +224,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
     showSideLeft: false,
     showSideRight: false,
     autoScale: true,
-    activeGroups: new Set([...new Set(devices.flatMap((d) => d.groups))]),
+    activeGroups: new Set([...new Set(devices.flatMap((d: any) => d.groups))]),
   };
 
   // --- UI ELEMENTS ---
@@ -78,26 +285,36 @@ export const initResponsiveUI = (devices, groupOffsets) => {
    * 2. Group Default Offset
    * 3. 'Other' Fallback
    */
-  const getOffset = (dev, key) => {
+  const getOffset = (dev: any, key: string) => {
     // 1. Check individual device overrides
     if (dev.offsets && typeof dev.offsets[key] !== 'undefined') {
-      return dev.offsets[key];
+      return dev.offsets[key] as number;
     }
 
     // 2. Check group defaults
-    const groupName = dev.groups.find((g) => groupOffsets[g]) || 'Other';
+    const groupName: string = dev.groups.find((g: string) => groupOffsets[g]) || 'Other';
     const set = groupOffsets[groupName] || groupOffsets['Other'] || {};
 
-    return typeof set[key] !== 'undefined' ? set[key] : 0;
+    return typeof set[key] !== 'undefined' ? (set[key] as number) : 0;
   };
 
   const updateAllShells = () => {
     document.querySelectorAll('.rr-shell').forEach((shell) => {
-      const dev = devices.find((d) => d.id === shell.dataset.id);
-      shell.querySelector('.rr-toolbar').classList.toggle('hidden', !state.showToolbar);
-      shell.querySelector('.rr-taskbar').classList.toggle('hidden', !state.showTaskbar);
-      shell.querySelector('.rr-sidenav-left').classList.toggle('hidden', !state.showSideLeft);
-      shell.querySelector('.rr-sidenav-right').classList.toggle('hidden', !state.showSideRight);
+      const id = (shell as HTMLElement).dataset.id;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const dev = devices.find((d: any) => d.id === id);
+
+      const toolbar = shell.querySelector('.rr-toolbar');
+      if (toolbar) toolbar.classList.toggle('hidden', !state.showToolbar);
+
+      const taskbar = shell.querySelector('.rr-taskbar');
+      if (taskbar) taskbar.classList.toggle('hidden', !state.showTaskbar);
+
+      const sideLeft = shell.querySelector('.rr-sidenav-left');
+      if (sideLeft) sideLeft.classList.toggle('hidden', !state.showSideLeft);
+
+      const sideRight = shell.querySelector('.rr-sidenav-right');
+      if (sideRight) sideRight.classList.toggle('hidden', !state.showSideRight);
     });
   };
 
@@ -105,8 +322,8 @@ export const initResponsiveUI = (devices, groupOffsets) => {
     grid.innerHTML = '';
     const maxAvailableW = window.innerWidth - 100;
 
-    devices.forEach((dev) => {
-      if (!dev.groups.some((g) => state.activeGroups.has(g))) return;
+    devices.forEach((dev: any) => {
+      if (!dev.groups.some((g: string) => state.activeGroups.has(g))) return;
 
       const isRotated = orientationState[dev.id] === 'landscape';
       const baseW = isRotated ? dev.height : dev.width;
@@ -166,7 +383,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       bodyWrapper.className = 'rr-body-wrapper';
 
       const sWidth = getOffset(dev, 'sideNav');
-      const createSideNav = (cls) => {
+      const createSideNav = (cls: string) => {
         const nav = document.createElement('div');
         nav.className = `rr-sidenav ${cls}`;
         nav.style.width = `${sWidth}px`;
@@ -218,9 +435,9 @@ export const initResponsiveUI = (devices, groupOffsets) => {
     // 1. Group Selection Buttons
     const groupPanel = document.createElement('div');
     groupPanel.style.display = 'flex';
-    [...new Set(devices.flatMap((d) => d.groups))].sort().forEach((g) => {
+    [...new Set(devices.flatMap((d: any) => d.groups))].sort().forEach((g) => {
       const t = document.createElement('button');
-      t.innerText = g;
+      t.innerText = g as string;
       const active = state.activeGroups.has(g);
       t.style.cssText = `padding:6px 12px; margin:2px; border-radius:6px; border:none; cursor:pointer; font-size:11px; background:${active ? '#444' : '#222'}; color:${active ? '#fff' : '#666'}; transition: 0.2s;`;
       t.onclick = () => {
@@ -236,7 +453,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
     simPanel.style.cssText =
       'border-left: 1px solid #333; padding-left: 20px; margin-left: 10px; display:flex; gap:8px;';
 
-    const toggles = [
+    const toggles: any = [
       ['🌐 Toolbar', 'showToolbar'],
       ['⌨️ Taskbar', 'showTaskbar'],
       ['⬅️ Side L', 'showSideLeft'],
@@ -244,13 +461,15 @@ export const initResponsiveUI = (devices, groupOffsets) => {
       ['🔍 Auto Scale', 'autoScale'],
     ];
 
-    toggles.forEach(([label, key]) => {
+    toggles.forEach((item: any) => {
+      const [label, key] = item;
       const t = document.createElement('button');
       t.innerText = label;
-      const active = state[key];
+      const active = (state as any)[key];
       t.style.cssText = `padding:6px 12px; border-radius:6px; font-size:11px; cursor:pointer; transition:0.2s; border:1px solid ${active ? '#646cff' : '#333'}; background:${active ? '#333' : '#1a1a1a'}; color:${active ? '#fff' : '#888'};`;
       t.onclick = () => {
-        state[key] = !state[key];
+        // @ts-ignore
+        (state as any)[key] = !state[key];
         // Auto scale and re-render or just toggle CSS classes
         if (key === 'autoScale') render();
         else updateAllShells();
@@ -285,7 +504,7 @@ export const initResponsiveUI = (devices, groupOffsets) => {
   };
 
   // Resize listener for auto-scaling
-  let resizeTimer;
+  let resizeTimer: any;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
