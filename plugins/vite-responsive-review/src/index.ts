@@ -1,8 +1,8 @@
-import { Plugin } from 'vite';
+import type { Plugin } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INDIVIDUAL_DEVICES, Device } from './devices';
+import { INDIVIDUAL_DEVICES, type Device } from './devices';
 
 // Handle directory name for ES modules
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -94,7 +94,21 @@ export function viteResponsiveReview(options: ResponsiveReviewOptions = {}): Plu
         .replace(/:\s*any/g, '')
         .replace(/:\s*Device\[\]/g, '')
         .replace(/:\s*string/g, '')
-        .replace(/:\s*number/g, '');
+        .replace(/:\s*number/g, '')
+        .replace(/:\s*Headers/g, '')
+        .replace(/:\s*Response/g, '')
+        .replace(/:\s*MessageEvent/g, '')
+        .replace(/:\s*Record<string,\s*string>/g, '')
+        .replace(/:\s*ReturnType<typeof\s*setTimeout>(\s*\|\s*null|\s*\|\s*undefined)?/g, '')
+        .replace(/:\s*Blob/g, '')
+        .replace(/:\s*HeadersInit/g, '')
+        .replace(/as\s+number/g, '')
+        .replace(/as\s+string/g, '')
+        .replace(/as\s+HTMLElement/g, '')
+        .replace(/as\s+Blob/g, '')
+        .replace(/as\s+HeadersInit/g, '')
+        .replace(/as\s+any/g, '')
+        .replace(/<string,\s*keyof\s+typeof\s+state>/g, '');
 
       // 6. Return the script to be injected into the <body>
       return [
